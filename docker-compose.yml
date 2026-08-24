@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: finance-ai-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: finance
+      POSTGRES_PASSWORD: finance
+      POSTGRES_DB: finance_ai
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - finance_ai_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  finance_ai_postgres_data:
