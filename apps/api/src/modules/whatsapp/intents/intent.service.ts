@@ -149,69 +149,6 @@ export function interpretWhatsAppIntent(
   return createResult("UNKNOWN", "NONE", rawText);
 }
 
-export function interpretFoundationCommandIntent(
-  input: string,
-): IntentResult {
-  const normalizedRawText = normalizeRawText(input);
-  const rawText = normalizedRawText.slice(
-    0,
-    MAX_FINANCIAL_MESSAGE_LENGTH,
-  );
-
-  if (
-    !normalizedRawText ||
-    normalizedRawText.length > MAX_FINANCIAL_MESSAGE_LENGTH ||
-    containsUnsafeInstruction(rawText)
-  ) {
-    return createResult("UNKNOWN", "NONE", rawText);
-  }
-
-  const exactIntent = exactIntents.get(
-    normalizeForMatching(rawText),
-  );
-
-  if (exactIntent) {
-    return createResult(exactIntent, "EXACT", rawText);
-  }
-
-  const comparableText = rawText.replace(/[!?]+$/g, "").trim();
-  const match = comparableText.match(
-    /^(gastei|paguei|recebi|ganhei)\s+(?:r\$\s*)?(\d+(?:[.,]\d{1,2})?)(.*)$/i,
-  );
-
-  if (!match?.[1] || !match[2]) {
-    return createResult("UNKNOWN", "NONE", rawText);
-  }
-
-  const amount = Number(match[2].replace(",", "."));
-
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return createResult("UNKNOWN", "NONE", rawText);
-  }
-
-  const isIncome = ["recebi", "ganhei"].includes(
-    normalizeForMatching(match[1]),
-  );
-  const prefix = isIncome
-    ? /^(?:reais?)?\s*(?:(?:de|do|da|por|com)\s+)?/i
-    : /^(?:reais?)?\s*(?:(?:com|em|no|na)\s+)?/i;
-  const description = match[3]
-    ?.trim()
-    .replace(prefix, "")
-    .trim()
-    .slice(0, 100);
-
-  return createResult(
-    isIncome ? "CREATE_INCOME" : "CREATE_EXPENSE",
-    "PATTERN",
-    rawText,
-    {
-      amount,
-      ...(description ? { description } : {}),
-    },
-  );
-}
-
 export function inferSafeCategoryHint(text: string) {
   const normalized = normalizeForMatching(text);
 
@@ -233,7 +170,7 @@ function parseQueryIntent(text: string) {
   const periodHint = resolvePeriodHint(text);
 
   if (
-    /\b(?:quanto (?:eu )?gastei|meus gastos|gastos|despesas)\b/.test(
+    /\b(?:quanto (?:eu )?gastei|gastei quanto|meus gastos|gastos|despesas)\b/.test(
       normalized,
     )
   ) {
@@ -243,9 +180,33 @@ function parseQueryIntent(text: string) {
     };
   }
 
-  if (/\b(?:qual|quanto|como esta).{0,20}\bsaldo\b/.test(normalized)) {
+  if (
+    /\b(?:qual|quanto|como esta).{0,20}\bsaldo\b/.test(normalized) ||
+    /\bquanto (?:eu )?tenho\b/.test(normalized)
+  ) {
     return {
       intent: "GET_BALANCE" as const,
+      entities: {},
+    };
+  }
+
+  if (/\borcamentos?\b/.test(normalized)) {
+    return {
+      intent: "GET_BUDGETS" as const,
+      entities: {},
+    };
+  }
+
+  if (/\bmetas?\b/.test(normalized)) {
+    return {
+      intent: "GET_GOALS" as const,
+      entities: {},
+    };
+  }
+
+  if (/\binsights?\b/.test(normalized)) {
+    return {
+      intent: "GET_INSIGHTS" as const,
       entities: {},
     };
   }

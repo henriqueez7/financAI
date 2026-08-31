@@ -1,9 +1,12 @@
 export type WhatsAppCommandCode =
-  | "PENDING_ACTION_CREATED"
   | "ACTION_CONFIRMED"
   | "ACTION_CANCELLED"
   | "NO_PENDING_ACTION"
-  | "NOT_IMPLEMENTED"
+  | "WRITE_NOT_ENABLED"
+  | "QUERY_RESULT"
+  | "AI_ANALYSIS"
+  | "QUERY_ERROR"
+  | "AI_ERROR"
   | "HELP"
   | "UNKNOWN";
 

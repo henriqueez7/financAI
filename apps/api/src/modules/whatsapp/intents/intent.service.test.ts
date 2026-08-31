@@ -241,6 +241,22 @@ test("reconhece perguntas financeiras frequentes", () => {
   }
 });
 
+test("reconhece variações naturais das consultas read-only", () => {
+  const cases = [
+    ["Quanto tenho?", "GET_BALANCE"],
+    ["Gastei quanto esse mês?", "GET_EXPENSES"],
+    ["Como estão minhas metas?", "GET_GOALS"],
+    ["Quais são meus insights?", "GET_INSIGHTS"],
+  ] as const;
+
+  for (const [text, intent] of cases) {
+    assert.equal(
+      interpretWhatsAppIntent(text, referenceDate).intent,
+      intent,
+    );
+  }
+});
+
 test("recusa mensagem acima do limite sem truncar para interpretar", () => {
   const result = interpretWhatsAppIntent(
     `gastei 10 ${"x".repeat(500)}`,

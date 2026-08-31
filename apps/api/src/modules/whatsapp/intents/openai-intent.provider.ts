@@ -38,3 +38,13 @@ export function createOpenAiIntentProvider() {
     createAiProvider({ maxRetries: 0 }),
   );
 }
+
+export class LazyOpenAiIntentProvider implements IntentAiProvider {
+  private provider?: IntentAiProvider;
+
+  interpret(request: IntentAiRequest) {
+    this.provider ??= createOpenAiIntentProvider();
+
+    return this.provider.interpret(request);
+  }
+}
