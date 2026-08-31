@@ -19,6 +19,8 @@ model User {
   budgets           Budget[]
   goals             Goal[]
   goalContributions GoalContribution[]
+  pendingFinancialActions PendingFinancialAction[]
+  whatsappConnections    WhatsAppConnection[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -162,6 +164,64 @@ model GoalContribution {
   @@map("goal_contributions")
 }
 
+model PendingFinancialAction {
+  id        String                       @id @default(uuid())
+  type      PendingFinancialActionType
+  payload   Json
+  status    PendingFinancialActionStatus @default(PENDING)
+  expiresAt DateTime
+
+  confirmedAt DateTime?
+  cancelledAt DateTime?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status, expiresAt])
+  @@index([expiresAt])
+  @@map("pending_financial_actions")
+}
+
+model WhatsAppConnection {
+  id          String                   @id @default(uuid())
+  phoneNumber String                   @unique
+  waId        String                   @unique
+  status      WhatsAppConnectionStatus @default(PENDING)
+  verifiedAt  DateTime?
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  messages WhatsAppMessage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@map("whatsapp_connections")
+}
+
+model WhatsAppMessage {
+  id          String                   @id @default(uuid())
+  messageId   String                   @unique
+  direction   WhatsAppMessageDirection
+  type        WhatsAppMessageType      @default(TEXT)
+  status      WhatsAppMessageStatus
+  receivedAt  DateTime?
+  processedAt DateTime?
+
+  connectionId String?
+  connection   WhatsAppConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([connectionId, createdAt])
+  @@map("whatsapp_messages")
+}
+
 enum AccountType {
   CHECKING
   SAVINGS
@@ -193,4 +253,39 @@ enum GoalStatus {
   COMPLETED
   PAUSED
   CANCELLED
+}
+
+enum PendingFinancialActionType {
+  CREATE_EXPENSE
+  CREATE_INCOME
+}
+
+enum PendingFinancialActionStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  EXPIRED
+}
+
+enum WhatsAppConnectionStatus {
+  PENDING
+  VERIFIED
+  REVOKED
+}
+
+enum WhatsAppMessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum WhatsAppMessageType {
+  TEXT
+  INTERACTIVE
+}
+
+enum WhatsAppMessageStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+  IGNORED
 }
