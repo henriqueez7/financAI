@@ -32,7 +32,12 @@ import {
   verifyWhatsAppConnection,
 } from "./connections/connection.service.js";
 import { getConversationState } from "./conversations/conversation.service.js";
-import { interpretWhatsAppIntent } from "./intents/intent.service.js";
+import { FakeIntentAiProvider } from "./intents/fake-intent-ai.provider.js";
+import { FinancialLanguageInterpreter } from "./intents/financial-language-interpreter.js";
+import {
+  interpretFoundationCommandIntent,
+  interpretWhatsAppIntent,
+} from "./intents/intent.service.js";
 import { FakeWhatsAppProvider } from "./messaging/fake-whatsapp.provider.js";
 import {
   WhatsAppMessageNotFoundError,
@@ -46,6 +51,7 @@ const suffix = `${Date.now()}-${Math.random()
   .slice(2)}`;
 const emailA = `whatsapp-a-${suffix}@example.com`;
 const emailB = `whatsapp-b-${suffix}@example.com`;
+const referenceDate = new Date("2026-08-30T12:00:00.000Z");
 
 let userAId = "";
 let userBId = "";
@@ -376,12 +382,13 @@ test("ownership protege a atualização de status da mensagem", async () => {
 test("command service responde ajuda e unknown sem efeitos", async () => {
   const help = await executeWhatsAppCommand({
     userId: userAId,
-    interpretation: interpretWhatsAppIntent("ajuda"),
+    interpretation: interpretWhatsAppIntent("ajuda", referenceDate),
   });
   const unknown = await executeWhatsAppCommand({
     userId: userAId,
     interpretation: interpretWhatsAppIntent(
       "mensagem desconhecida",
+      referenceDate,
     ),
   });
 
@@ -396,10 +403,43 @@ test("command service responde ajuda e unknown sem efeitos", async () => {
   );
 });
 
+test("interpretação por IA não cria pending action nem Entry", async () => {
+  const provider = new FakeIntentAiProvider({
+    intent: "CREATE_EXPENSE",
+    entities: {
+      amount: 120,
+      description: "mercado",
+      date: "2026-08-29",
+      categoryHint: "Alimentação",
+      accountHint: null,
+      periodHint: null,
+    },
+  });
+  const interpreter = new FinancialLanguageInterpreter(provider);
+
+  const result = await interpreter.interpret(
+    "Ontem deixei 120 conto no mercado",
+    referenceDate,
+  );
+
+  assert.equal(result.intent, "CREATE_EXPENSE");
+  assert.equal(provider.requests.length, 1);
+  assert.equal(
+    await prisma.pendingFinancialAction.count({
+      where: { userId: userAId },
+    }),
+    0,
+  );
+  assert.equal(
+    await prisma.entry.count({ where: { userId: userAId } }),
+    0,
+  );
+});
+
 test("command service cria somente uma proposta pendente", async () => {
   const result = await executeWhatsAppCommand({
     userId: userAId,
-    interpretation: interpretWhatsAppIntent(
+    interpretation: interpretFoundationCommandIntent(
       "Gastei 48 reais no almoço",
     ),
   });
@@ -428,7 +468,10 @@ test("command service confirma e cancela somente pending actions", async () => {
   const confirmAction = await createExpenseAction(userAId);
   const confirmation = await executeWhatsAppCommand({
     userId: userAId,
-    interpretation: interpretWhatsAppIntent("confirmar"),
+    interpretation: interpretWhatsAppIntent(
+      "confirmar",
+      referenceDate,
+    ),
   });
 
   assert.equal(confirmation.code, "ACTION_CONFIRMED");
@@ -440,7 +483,10 @@ test("command service confirma e cancela somente pending actions", async () => {
   const cancelAction = await createExpenseAction(userAId);
   const cancellation = await executeWhatsAppCommand({
     userId: userAId,
-    interpretation: interpretWhatsAppIntent("cancelar"),
+    interpretation: interpretWhatsAppIntent(
+      "cancelar",
+      referenceDate,
+    ),
   });
 
   assert.equal(cancellation.code, "ACTION_CANCELLED");

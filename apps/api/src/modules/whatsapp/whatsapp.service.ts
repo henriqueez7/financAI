@@ -1,6 +1,6 @@
 import { executeWhatsAppCommand } from "./commands/command.service.js";
 import { getVerifiedWhatsAppConnectionByWaId } from "./connections/connection.service.js";
-import { interpretWhatsAppIntent } from "./intents/intent.service.js";
+import { interpretFoundationCommandIntent } from "./intents/intent.service.js";
 import type { MessageProvider } from "./messaging/message.provider.js";
 import {
   markWhatsAppMessageFailed,
@@ -40,7 +40,7 @@ export class WhatsAppService {
     }
 
     try {
-      const interpretation = interpretWhatsAppIntent(
+      const interpretation = interpretFoundationCommandIntent(
         input.text,
       );
       const command = await executeWhatsAppCommand({

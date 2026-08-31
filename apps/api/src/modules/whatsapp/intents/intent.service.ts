@@ -1,10 +1,22 @@
+import {
+  removeRelativeDateWords,
+  resolvePeriodHint,
+  resolveRelativeDate,
+} from "./date.parser.js";
 import { intentResultSchema } from "./intent.schema.js";
+import {
+  normalizeForMatching,
+  normalizeRawText,
+} from "./intent.normalization.js";
+import { containsUnsafeInstruction } from "./intent.safety.js";
 import type {
   FinancialEntities,
   IntentConfidence,
   IntentResult,
   WhatsAppIntent,
 } from "./intent.types.js";
+import { MAX_FINANCIAL_MESSAGE_LENGTH } from "./intent.types.js";
+import { extractBrazilianMoney } from "./money.parser.js";
 
 const exactIntents = new Map<string, WhatsAppIntent>([
   ["saldo", "GET_BALANCE"],
@@ -32,22 +44,98 @@ const exactIntents = new Map<string, WhatsAppIntent>([
   ["o que voce faz", "HELP"],
 ]);
 
+const financeQuestionPatterns = [
+  /\bcomo (?:estao|andam) minhas financas\b/,
+  /\bonde (?:eu )?posso economizar\b/,
+  /\bcomo posso economizar\b/,
+  /\b(?:analise|avalie) minhas financas\b/,
+  /\b(?:tenho|estou com) algum risco financeiro\b/,
+  /\bestou gastando demais\b/,
+  /\bo que merece minha atencao\b/,
+  /\bminha situacao melhorou\b/,
+];
+
+const categoryRules: ReadonlyArray<{
+  pattern: RegExp;
+  label: string;
+}> = [
+  {
+    pattern: /\b(?:mercado|supermercado|alimentacao|restaurante|lanche)\b/,
+    label: "Alimentação",
+  },
+  {
+    pattern: /\b(?:uber|taxi|99|transporte|onibus|metro)\b/,
+    label: "Transporte",
+  },
+  {
+    pattern: /\b(?:aluguel|moradia|condominio)\b/,
+    label: "Moradia",
+  },
+  {
+    pattern: /\b(?:salario|ordenado)\b/,
+    label: "Salário",
+  },
+];
+
+const accountRules: ReadonlyArray<{
+  pattern: RegExp;
+  label: string;
+}> = [
+  { pattern: /\bnubank\b/, label: "Nubank" },
+  { pattern: /\binter\b/, label: "Inter" },
+  { pattern: /\bitau\b/, label: "Itaú" },
+  { pattern: /\bbradesco\b/, label: "Bradesco" },
+  { pattern: /\bsantander\b/, label: "Santander" },
+];
+
 export function interpretWhatsAppIntent(
   input: string,
+  referenceDate: Date,
 ): IntentResult {
-  const rawText = input.trim().slice(0, 1_000);
+  const normalizedRawText = normalizeRawText(input);
+  const rawText = normalizedRawText.slice(
+    0,
+    MAX_FINANCIAL_MESSAGE_LENGTH,
+  );
+
+  if (
+    !normalizedRawText ||
+    normalizedRawText.length > MAX_FINANCIAL_MESSAGE_LENGTH ||
+    containsUnsafeInstruction(rawText)
+  ) {
+    return createResult("UNKNOWN", "NONE", rawText);
+  }
+
   const normalizedText = normalizeForMatching(rawText);
   const exactIntent = exactIntents.get(normalizedText);
 
   if (exactIntent) {
+    return createResult(exactIntent, "EXACT", rawText);
+  }
+
+  const queryIntent = parseQueryIntent(rawText);
+
+  if (queryIntent) {
     return createResult(
-      exactIntent,
-      "EXACT",
+      queryIntent.intent,
+      "PATTERN",
       rawText,
+      queryIntent.entities,
     );
   }
 
-  const creationIntent = parseCreationIntent(rawText);
+  if (
+    financeQuestionPatterns.some((pattern) =>
+      pattern.test(normalizedText),
+    )
+  ) {
+    return createResult("ASK_FINANCE_AI", "PATTERN", rawText);
+  }
+
+  const creationIntent = parseCreationIntent(
+    rawText,
+    referenceDate,
+  );
 
   if (creationIntent) {
     return createResult(
@@ -61,69 +149,177 @@ export function interpretWhatsAppIntent(
   return createResult("UNKNOWN", "NONE", rawText);
 }
 
-function parseCreationIntent(text: string) {
-  const comparableText = text
-    .replace(/[!?]+$/g, "")
-    .trim();
-
-  const expenseMatch = comparableText.match(
-    /^(?:gastei|paguei)\s+(?:r\$\s*)?(\d+(?:[.,]\d{1,2})?)(.*)$/i,
+export function interpretFoundationCommandIntent(
+  input: string,
+): IntentResult {
+  const normalizedRawText = normalizeRawText(input);
+  const rawText = normalizedRawText.slice(
+    0,
+    MAX_FINANCIAL_MESSAGE_LENGTH,
   );
 
-  if (expenseMatch) {
-    return buildCreationIntent(
-      "CREATE_EXPENSE",
-      expenseMatch[1],
-      expenseMatch[2],
-      /^(?:reais?)?\s*(?:(?:com|em|no|na)\s+)?/i,
-    );
+  if (
+    !normalizedRawText ||
+    normalizedRawText.length > MAX_FINANCIAL_MESSAGE_LENGTH ||
+    containsUnsafeInstruction(rawText)
+  ) {
+    return createResult("UNKNOWN", "NONE", rawText);
   }
 
-  const incomeMatch = comparableText.match(
-    /^(?:recebi|ganhei)\s+(?:r\$\s*)?(\d+(?:[.,]\d{1,2})?)(.*)$/i,
+  const exactIntent = exactIntents.get(
+    normalizeForMatching(rawText),
   );
 
-  if (incomeMatch) {
-    return buildCreationIntent(
-      "CREATE_INCOME",
-      incomeMatch[1],
-      incomeMatch[2],
-      /^(?:reais?)?\s*(?:(?:de|do|da|por|com)\s+)?/i,
-    );
+  if (exactIntent) {
+    return createResult(exactIntent, "EXACT", rawText);
+  }
+
+  const comparableText = rawText.replace(/[!?]+$/g, "").trim();
+  const match = comparableText.match(
+    /^(gastei|paguei|recebi|ganhei)\s+(?:r\$\s*)?(\d+(?:[.,]\d{1,2})?)(.*)$/i,
+  );
+
+  if (!match?.[1] || !match[2]) {
+    return createResult("UNKNOWN", "NONE", rawText);
+  }
+
+  const amount = Number(match[2].replace(",", "."));
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return createResult("UNKNOWN", "NONE", rawText);
+  }
+
+  const isIncome = ["recebi", "ganhei"].includes(
+    normalizeForMatching(match[1]),
+  );
+  const prefix = isIncome
+    ? /^(?:reais?)?\s*(?:(?:de|do|da|por|com)\s+)?/i
+    : /^(?:reais?)?\s*(?:(?:com|em|no|na)\s+)?/i;
+  const description = match[3]
+    ?.trim()
+    .replace(prefix, "")
+    .trim()
+    .slice(0, 100);
+
+  return createResult(
+    isIncome ? "CREATE_INCOME" : "CREATE_EXPENSE",
+    "PATTERN",
+    rawText,
+    {
+      amount,
+      ...(description ? { description } : {}),
+    },
+  );
+}
+
+export function inferSafeCategoryHint(text: string) {
+  const normalized = normalizeForMatching(text);
+
+  return categoryRules.find(({ pattern }) =>
+    pattern.test(normalized),
+  )?.label;
+}
+
+export function inferSafeAccountHint(text: string) {
+  const normalized = normalizeForMatching(text);
+
+  return accountRules.find(({ pattern }) =>
+    pattern.test(normalized),
+  )?.label;
+}
+
+function parseQueryIntent(text: string) {
+  const normalized = normalizeForMatching(text);
+  const periodHint = resolvePeriodHint(text);
+
+  if (
+    /\b(?:quanto (?:eu )?gastei|meus gastos|gastos|despesas)\b/.test(
+      normalized,
+    )
+  ) {
+    return {
+      intent: "GET_EXPENSES" as const,
+      entities: periodHint ? { periodHint } : {},
+    };
+  }
+
+  if (/\b(?:qual|quanto|como esta).{0,20}\bsaldo\b/.test(normalized)) {
+    return {
+      intent: "GET_BALANCE" as const,
+      entities: {},
+    };
   }
 
   return null;
 }
 
-function buildCreationIntent(
-  intent: "CREATE_EXPENSE" | "CREATE_INCOME",
-  amountText: string | undefined,
-  descriptionText: string | undefined,
-  descriptionPrefix: RegExp,
+function parseCreationIntent(
+  text: string,
+  referenceDate: Date,
 ) {
-  if (!amountText) {
+  const comparableText = text.replace(/[!?]+$/g, "").trim();
+  const verbMatch = comparableText.match(
+    /^(gastei|paguei|comprei|recebi|ganhei|entrou)\b/i,
+  );
+
+  if (!verbMatch?.[1]) {
     return null;
   }
 
-  const amount = Number(amountText.replace(",", "."));
-
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return null;
-  }
-
-  const description = descriptionText
-    ?.trim()
-    .replace(descriptionPrefix, "")
-    .trim()
-    .slice(0, 100);
+  const normalizedVerb = normalizeForMatching(verbMatch[1]);
+  const intent = ["recebi", "ganhei", "entrou"].includes(
+    normalizedVerb,
+  )
+    ? ("CREATE_INCOME" as const)
+    : ("CREATE_EXPENSE" as const);
+  const money = extractBrazilianMoney(comparableText);
+  const date = resolveRelativeDate(comparableText, referenceDate);
+  const description = extractDescription(
+    comparableText,
+    verbMatch[0].length,
+    money,
+  );
+  const categoryHint = inferSafeCategoryHint(
+    description ?? comparableText,
+  );
+  const accountHint = inferSafeAccountHint(comparableText);
 
   return {
     intent,
     entities: {
-      amount,
+      ...(money ? { amount: money.amount } : {}),
       ...(description ? { description } : {}),
+      ...(date ? { date } : {}),
+      ...(categoryHint ? { categoryHint } : {}),
+      ...(accountHint ? { accountHint } : {}),
     },
   };
+}
+
+function extractDescription(
+  text: string,
+  verbEndIndex: number,
+  money: ReturnType<typeof extractBrazilianMoney>,
+) {
+  const withoutVerb = text.slice(verbEndIndex);
+  let candidate = withoutVerb;
+
+  if (money) {
+    const relativeStart = Math.max(0, money.index - verbEndIndex);
+    const relativeEnd = Math.max(0, money.endIndex - verbEndIndex);
+    candidate = `${withoutVerb.slice(0, relativeStart)} ${withoutVerb.slice(relativeEnd)}`;
+  }
+
+  candidate = removeRelativeDateWords(candidate)
+    .replace(/\b(?:reais?|contos?)\b/giu, " ")
+    .replace(/^(?:de|do|da|dos|das|com|em|no|na|nos|nas|por)\s+/iu, "")
+    .replace(/\s+(?:de|do|da|dos|das|com|em|no|na|nos|nas|por)$/iu, "")
+    .replace(/\s+/g, " ")
+    .replace(/^[,;:\-]+|[,;:\-]+$/g, "")
+    .trim()
+    .slice(0, 100);
+
+  return candidate || undefined;
 }
 
 function createResult(
@@ -134,22 +330,9 @@ function createResult(
 ) {
   return intentResultSchema.parse({
     intent,
+    source: "DETERMINISTIC",
     confidence,
     rawText,
     entities,
   });
-}
-
-function normalizeForMatching(text: string) {
-  return removeDiacritics(text)
-    .toLocaleLowerCase("pt-BR")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function removeDiacritics(text: string) {
-  return text
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "");
 }

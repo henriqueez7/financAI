@@ -25,6 +25,7 @@ interface OpenAiProviderOptions {
   apiKey?: string;
   model?: string;
   timeoutMs?: number;
+  maxRetries?: number;
 }
 
 export class OpenAiProvider implements AiProvider {
@@ -48,7 +49,7 @@ export class OpenAiProvider implements AiProvider {
     this.client = new OpenAI({
       apiKey,
       timeout: options.timeoutMs ?? defaultTimeoutMs,
-      maxRetries: 1,
+      maxRetries: options.maxRetries ?? 1,
     });
   }
 
@@ -109,9 +110,12 @@ export class OpenAiProvider implements AiProvider {
   }
 }
 
-export function createAiProvider() {
+export function createAiProvider(
+  options: Pick<OpenAiProviderOptions, "maxRetries"> = {},
+) {
   return new OpenAiProvider({
     apiKey: process.env.OPENAI_API_KEY,
     model: process.env.OPENAI_MODEL,
+    maxRetries: options.maxRetries,
   });
 }
