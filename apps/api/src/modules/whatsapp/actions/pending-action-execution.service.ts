@@ -1,11 +1,11 @@
+import type { Prisma } from "../../../../generated/prisma/client.js";
+import { prisma } from "../../../lib/prisma.js";
 import {
   AccountNotFoundError,
   CategoryNotFoundError,
   CategoryTypeMismatchError,
   createEntry,
 } from "../../entries/entry.service.js";
-import type { Prisma } from "../../../../generated/prisma/client.js";
-import { prisma } from "../../../lib/prisma.js";
 import { pendingFinancialActionPayloadSchema } from "./pending-action.schema.js";
 
 type EntryCreator = typeof createEntry;
@@ -47,26 +47,18 @@ export async function executeLatestPendingFinancialAction(
         where: {
           userId,
           status: "PENDING",
-          expiresAt: {
-            lte: now,
-          },
+          expiresAt: { lte: now },
         },
-        data: {
-          status: "EXPIRED",
-        },
+        data: { status: "EXPIRED" },
       });
     const action =
       await transaction.pendingFinancialAction.findFirst({
         where: {
           userId,
           status: "PENDING",
-          expiresAt: {
-            gt: now,
-          },
+          expiresAt: { gt: now },
         },
-        orderBy: {
-          createdAt: "desc",
-        },
+        orderBy: { createdAt: "desc" },
       });
 
     if (!action) {
@@ -92,24 +84,66 @@ export async function executeLatestPendingFinancialAction(
       return { status: "INVALID_PAYLOAD" };
     }
 
-    const claim =
-      await transaction.pendingFinancialAction.updateMany({
-        where: {
-          id: action.id,
+    const externalId = `whatsapp:${action.id}`;
+    const existingEntry = await transaction.entry.findUnique({
+      where: { externalId },
+      select: {
+        userId: true,
+        accountId: true,
+        categoryId: true,
+        description: true,
+        amount: true,
+        type: true,
+        status: true,
+        source: true,
+        dueDate: true,
+      },
+    });
+
+    if (existingEntry) {
+      if (
+        !matchesPendingAction({
+          actionType: action.type,
+          existingEntry,
+          payload: payload.data,
           userId,
-          status: "PENDING",
-          expiresAt: {
-            gt: now,
-          },
-        },
-        data: {
-          status: "CONFIRMED",
-          confirmedAt: now,
-          cancelledAt: null,
-        },
+        })
+      ) {
+        await cancelInvalidAction({
+          actionId: action.id,
+          userId,
+          now,
+          transaction,
+        });
+
+        return { status: "INVALID_PAYLOAD" };
+      }
+
+      const reconciled = await claimPendingAction({
+        actionId: action.id,
+        userId,
+        now,
+        transaction,
       });
 
-    if (claim.count === 0) {
+      return reconciled
+        ? {
+            status: "CREATED",
+            type: action.type,
+            amount: payload.data.amount,
+            description: payload.data.description,
+          }
+        : { status: "NO_PENDING" };
+    }
+
+    const claimed = await claimPendingAction({
+      actionId: action.id,
+      userId,
+      now,
+      transaction,
+    });
+
+    if (!claimed) {
       return { status: "NO_PENDING" };
     }
 
@@ -133,7 +167,7 @@ export async function executeLatestPendingFinancialAction(
         },
         client: transaction,
         source: "WHATSAPP",
-        externalId: `whatsapp:${action.id}`,
+        externalId,
         now,
       });
     } catch (error) {
@@ -166,6 +200,35 @@ export async function executeLatestPendingFinancialAction(
   });
 }
 
+async function claimPendingAction({
+  actionId,
+  userId,
+  now,
+  transaction,
+}: {
+  actionId: string;
+  userId: string;
+  now: Date;
+  transaction: Prisma.TransactionClient;
+}) {
+  const claim =
+    await transaction.pendingFinancialAction.updateMany({
+      where: {
+        id: actionId,
+        userId,
+        status: "PENDING",
+        expiresAt: { gt: now },
+      },
+      data: {
+        status: "CONFIRMED",
+        confirmedAt: now,
+        cancelledAt: null,
+      },
+    });
+
+  return claim.count === 1;
+}
+
 async function cancelInvalidAction({
   actionId,
   userId,
@@ -195,5 +258,47 @@ function isInvalidReferenceError(error: unknown) {
     error instanceof AccountNotFoundError ||
     error instanceof CategoryNotFoundError ||
     error instanceof CategoryTypeMismatchError
+  );
+}
+
+function matchesPendingAction({
+  actionType,
+  existingEntry,
+  payload,
+  userId,
+}: {
+  actionType: "CREATE_EXPENSE" | "CREATE_INCOME";
+  existingEntry: {
+    userId: string;
+    accountId: string | null;
+    categoryId: string | null;
+    description: string;
+    amount: { toNumber(): number };
+    type: "EXPENSE" | "INCOME";
+    status: "PENDING" | "COMPLETED" | "CANCELLED";
+    source: "WEB" | "WHATSAPP" | "IMPORT";
+    dueDate: Date;
+  };
+  payload: {
+    amount: number;
+    description: string;
+    date: string;
+    accountId?: string;
+    categoryId?: string;
+  };
+  userId: string;
+}) {
+  return (
+    existingEntry.userId === userId &&
+    existingEntry.accountId === (payload.accountId ?? null) &&
+    existingEntry.categoryId === (payload.categoryId ?? null) &&
+    existingEntry.description === payload.description &&
+    existingEntry.amount.toNumber() === payload.amount &&
+    existingEntry.type ===
+      (actionType === "CREATE_EXPENSE" ? "EXPENSE" : "INCOME") &&
+    existingEntry.status === "COMPLETED" &&
+    existingEntry.source === "WHATSAPP" &&
+    existingEntry.dueDate.toISOString().slice(0, 10) ===
+      payload.date
   );
 }

@@ -81,6 +81,7 @@ export async function createPendingFinancialAction({
         payload:
           validatedPayload as unknown as Prisma.InputJsonObject,
         expiresAt,
+        createdAt: now,
       },
     });
   });
