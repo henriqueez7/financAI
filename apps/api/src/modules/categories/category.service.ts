@@ -103,6 +103,35 @@ interface ListCategoriesParams {
   userId: string;
 }
 
+export async function findUniqueActiveCategoryByName({
+  userId,
+  name,
+  type,
+}: {
+  userId: string;
+  name: string;
+  type: "INCOME" | "EXPENSE";
+}) {
+  const matches = await prisma.category.findMany({
+    where: {
+      userId,
+      type,
+      isActive: true,
+      name: {
+        equals: name.trim(),
+        mode: "insensitive",
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+    take: 2,
+  });
+
+  return matches.length === 1 ? matches[0] : null;
+}
+
 export async function listCategories({
   userId,
 }: ListCategoriesParams) {

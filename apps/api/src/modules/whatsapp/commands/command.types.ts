@@ -1,8 +1,12 @@
 export type WhatsAppCommandCode =
-  | "ACTION_CONFIRMED"
+  | "PENDING_ACTION_CREATED"
+  | "INCOMPLETE_ACTION"
+  | "ENTRY_CREATED"
   | "ACTION_CANCELLED"
+  | "ACTION_EXPIRED"
+  | "ACTION_INVALID"
   | "NO_PENDING_ACTION"
-  | "WRITE_NOT_ENABLED"
+  | "WRITE_ERROR"
   | "QUERY_RESULT"
   | "AI_ANALYSIS"
   | "QUERY_ERROR"
@@ -13,5 +17,4 @@ export type WhatsAppCommandCode =
 export interface WhatsAppCommandResult {
   code: WhatsAppCommandCode;
   message: string;
-  pendingActionId?: string;
 }

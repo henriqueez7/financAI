@@ -19,12 +19,11 @@ import { generateAiAnalysis } from "../ai/ai.service.js";
 import {
   PENDING_FINANCIAL_ACTION_TTL_MS,
   PendingFinancialActionNotFoundError,
-  PendingFinancialActionUnavailableError,
   cancelPendingFinancialAction,
-  confirmPendingFinancialAction,
   createPendingFinancialAction,
   getPendingFinancialAction,
 } from "./actions/pending-action.service.js";
+import { executeLatestPendingFinancialAction } from "./actions/pending-action-execution.service.js";
 import {
   WHATSAPP_HELP_MESSAGE,
   executeWhatsAppCommand,
@@ -167,6 +166,7 @@ test("cria ação pendente com payload e TTL centralizado", async () => {
   assert.deepEqual(action.payload, {
     amount: 48,
     description: "almoço",
+    date: now.toISOString().slice(0, 10),
   });
   assert.equal(
     action.expiresAt.getTime() - now.getTime(),
@@ -174,22 +174,31 @@ test("cria ação pendente com payload e TTL centralizado", async () => {
   );
 });
 
-test("confirma ação sem criar lançamento financeiro", async () => {
+test("executa ação pendente e conclui o lançamento atomicamente", async () => {
   const action = await createExpenseAction(userAId);
 
-  const confirmed = await confirmPendingFinancialAction({
+  const execution = await executeLatestPendingFinancialAction({
     userId: userAId,
-    actionId: action.id,
   });
 
+  assert.equal(execution.status, "CREATED");
+  const confirmed =
+    await prisma.pendingFinancialAction.findUniqueOrThrow({
+      where: { id: action.id },
+    });
+  const entry = await prisma.entry.findUniqueOrThrow({
+    where: { externalId: `whatsapp:${action.id}` },
+  });
   assert.equal(confirmed.status, "CONFIRMED");
   assert.ok(confirmed.confirmedAt);
-  assert.equal(confirmed.cancelledAt, null);
+  assert.equal(entry.type, "EXPENSE");
+  assert.equal(entry.status, "COMPLETED");
+  assert.equal(entry.source, "WHATSAPP");
   assert.equal(
     await prisma.entry.count({
       where: { userId: userAId },
     }),
-    0,
+    1,
   );
 });
 
@@ -220,50 +229,42 @@ test("expira ação de forma lazy e impede confirmação", async () => {
   });
 
   assert.equal(expired.status, "EXPIRED");
-  await assert.rejects(
-    () =>
-      confirmPendingFinancialAction({
-        userId: userAId,
-        actionId: action.id,
-        now: afterExpiration,
-      }),
-    (error: unknown) =>
-      error instanceof
-        PendingFinancialActionUnavailableError &&
-      error.status === "EXPIRED",
+  assert.deepEqual(
+    await executeLatestPendingFinancialAction({
+      userId: userAId,
+      now: afterExpiration,
+    }),
+    { status: "NO_PENDING" },
   );
 });
 
-test("não confirma ação cancelada", async () => {
+test("não executa ação cancelada", async () => {
   const action = await createExpenseAction(userAId);
   await cancelPendingFinancialAction({
     userId: userAId,
     actionId: action.id,
   });
 
-  await assert.rejects(
-    () =>
-      confirmPendingFinancialAction({
-        userId: userAId,
-        actionId: action.id,
-      }),
-    (error: unknown) =>
-      error instanceof
-        PendingFinancialActionUnavailableError &&
-      error.status === "CANCELLED",
+  assert.deepEqual(
+    await executeLatestPendingFinancialAction({
+      userId: userAId,
+    }),
+    { status: "NO_PENDING" },
+  );
+  assert.equal(
+    await prisma.entry.count({ where: { userId: userAId } }),
+    0,
   );
 });
 
 test("ownership impede confirmação e cancelamento por outro usuário", async () => {
   const action = await createExpenseAction(userAId);
 
-  await assert.rejects(
-    () =>
-      confirmPendingFinancialAction({
-        userId: userBId,
-        actionId: action.id,
-      }),
-    PendingFinancialActionNotFoundError,
+  assert.deepEqual(
+    await executeLatestPendingFinancialAction({
+      userId: userBId,
+    }),
+    { status: "NO_PENDING" },
   );
   await assert.rejects(
     () =>
@@ -460,7 +461,8 @@ test("command service responde ajuda e unknown sem efeitos", async () => {
   assert.equal(help.message, WHATSAPP_HELP_MESSAGE);
   assert.match(help.message, /saldo/);
   assert.match(help.message, /análise financeira/);
-  assert.match(help.message, /ainda não registro lançamentos/);
+  assert.match(help.message, /registrar receitas/);
+  assert.match(help.message, /confirmação explícita/);
   assert.equal(unknown.code, "UNKNOWN");
   assert.match(unknown.message, /Não consegui entender/);
   assert.equal(
@@ -504,7 +506,7 @@ test("interpretação por IA não cria pending action nem Entry", async () => {
   );
 });
 
-test("command service não cria proposta nem lançamento na Fase 03", async () => {
+test("command service cria proposta completa sem criar Entry", async () => {
   const result = await executeWhatsAppCommand({
     userId: userAId,
     interpretation: interpretWhatsAppIntent(
@@ -513,12 +515,12 @@ test("command service não cria proposta nem lançamento na Fase 03", async () =
     ),
   });
 
-  assert.equal(result.code, "WRITE_NOT_ENABLED");
+  assert.equal(result.code, "PENDING_ACTION_CREATED");
   assert.equal(
     await prisma.pendingFinancialAction.count({
       where: { userId: userAId },
     }),
-    0,
+    1,
   );
   assert.equal(
     await prisma.entry.count({
@@ -528,7 +530,7 @@ test("command service não cria proposta nem lançamento na Fase 03", async () =
   );
 });
 
-test("command service confirma e cancela somente pending actions", async () => {
+test("command service confirma com Entry e cancela sem Entry", async () => {
   const confirmAction = await createExpenseAction(userAId);
   const confirmation = await executeWhatsAppCommand({
     userId: userAId,
@@ -538,10 +540,16 @@ test("command service confirma e cancela somente pending actions", async () => {
     ),
   });
 
-  assert.equal(confirmation.code, "ACTION_CONFIRMED");
+  assert.equal(confirmation.code, "ENTRY_CREATED");
+  assert.match(confirmation.message, /registrada com sucesso/);
   assert.equal(
-    confirmation.pendingActionId,
-    confirmAction.id,
+    await prisma.entry.count({
+      where: {
+        userId: userAId,
+        externalId: `whatsapp:${confirmAction.id}`,
+      },
+    }),
+    1,
   );
 
   const cancelAction = await createExpenseAction(userAId);
@@ -554,7 +562,14 @@ test("command service confirma e cancela somente pending actions", async () => {
   });
 
   assert.equal(cancellation.code, "ACTION_CANCELLED");
-  assert.equal(cancellation.pendingActionId, cancelAction.id);
+  assert.equal(
+    (
+      await prisma.pendingFinancialAction.findUniqueOrThrow({
+        where: { id: cancelAction.id },
+      })
+    ).status,
+    "CANCELLED",
+  );
 });
 
 test("confirmar e cancelar sem pending retornam resposta segura", async () => {
@@ -805,29 +820,44 @@ test("ASK_FINANCE_AI falha fechado quando o provider fica indisponível", async 
   assert.equal(analysisProvider.calls, 1);
 });
 
-test("CREATE_EXPENSE e CREATE_INCOME não alteram dados nem criam pending", async () => {
-  await createFinancialFixture(userAId, "A");
+test("CREATE gera pending sem Entry e substitui a proposta ativa", async () => {
   const harness = await createServiceHarness(userAId, "1");
-  const before = await financialSnapshot(userAId);
 
   const expense = await sendThroughWhatsApp(
     harness,
-    "Gastei 89 reais no mercado hoje",
-    "write-expense-disabled",
+    "Gastei 89 reais no mercado ontem",
+    "write-expense-proposal",
   );
+  const first =
+    await prisma.pendingFinancialAction.findFirstOrThrow({
+      where: { userId: userAId, status: "PENDING" },
+    });
   const income = await sendThroughWhatsApp(
     harness,
     "Recebi 2500 do freela hoje",
-    "write-income-disabled",
+    "write-income-proposal",
   );
 
-  assert.match(expense, /registro pelo WhatsApp ainda não/);
-  assert.match(income, /registro pelo WhatsApp ainda não/);
-  assert.deepEqual(await financialSnapshot(userAId), before);
+  assert.match(expense, /Encontrei esta despesa/);
+  assert.match(expense, /29\/08\/2026/);
+  assert.match(income, /Encontrei esta receita/);
+  assert.match(income, /30\/08\/2026/);
   assert.equal(
     await prisma.pendingFinancialAction.count({
       where: { userId: userAId },
     }),
+    2,
+  );
+  assert.equal(
+    (
+      await prisma.pendingFinancialAction.findUniqueOrThrow({
+        where: { id: first.id },
+      })
+    ).status,
+    "CANCELLED",
+  );
+  assert.equal(
+    await prisma.entry.count({ where: { userId: userAId } }),
     0,
   );
 });
@@ -901,6 +931,7 @@ async function createExpenseAction(
     payload: {
       amount: 48,
       description: "almoço",
+      date: now.toISOString().slice(0, 10),
     },
     now,
   });

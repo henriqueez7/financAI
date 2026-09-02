@@ -7,10 +7,12 @@ import {
   formatBalanceResponse,
   formatBudgetsResponse,
   formatCurrency,
+  formatEntryCreatedResponse,
   formatExpensesResponse,
+  formatFinancialActionProposal,
   formatGoalsResponse,
+  formatIncompleteFinancialAction,
   formatInsightsResponse,
-  formatWriteNotEnabledResponse,
   limitWhatsAppResponse,
 } from "./response.formatter.js";
 
@@ -146,14 +148,39 @@ test("compacta análise existente sem uma segunda geração", () => {
   );
 });
 
-test("informa escrita desabilitada sem criar proposta", () => {
+test("formata proposta, dados incompletos e sucesso sem IDs", () => {
   assert.equal(
-    formatWriteNotEnabledResponse({
+    formatFinancialActionProposal({
       intent: "CREATE_EXPENSE",
       amount: 89,
       description: "Mercado",
+      date: "2026-08-29",
+      categoryName: "Alimentação",
+      accountName: "Nubank",
     }),
-    "Entendi uma despesa de R$ 89,00 em Mercado, mas o registro pelo WhatsApp ainda não está habilitado.",
+    [
+      "Encontrei esta despesa:",
+      "",
+      "💸 R$ 89,00",
+      "📝 Mercado",
+      "📅 29/08/2026",
+      "🏷️ Alimentação",
+      "🏦 Nubank",
+      "",
+      "Confirma o registro?",
+    ].join("\n"),
+  );
+  assert.equal(
+    formatEntryCreatedResponse({
+      type: "CREATE_INCOME",
+      amount: 2_500,
+      description: "Freela",
+    }),
+    "✅ Receita registrada com sucesso.\n\nR$ 2.500,00 — Freela",
+  );
+  assert.match(
+    formatIncompleteFinancialAction("amount"),
+    /identificar o valor/,
   );
 });
 

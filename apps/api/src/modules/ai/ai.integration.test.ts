@@ -257,7 +257,12 @@ test("rate limit por usuário não transfere contador para outro usuário", asyn
       {
         method: "POST",
         headers: authorizationHeaders(ownerToken),
-        body: JSON.stringify({ filters: {} }),
+        body: JSON.stringify({
+          filters: {
+            month: 8,
+            year: 2026,
+          },
+        }),
       },
     );
 
@@ -291,7 +296,12 @@ test("rate limit por IP é compartilhado entre contas", async () => {
         {
           method: "POST",
           headers: authorizationHeaders(ownerToken),
-          body: JSON.stringify({ filters: {} }),
+          body: JSON.stringify({
+            filters: {
+              month: 8,
+              year: 2026,
+            },
+          }),
         },
       );
 

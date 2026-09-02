@@ -1,10 +1,14 @@
 import {
   cancelLatestPendingFinancialAction,
-  confirmLatestPendingFinancialAction,
+  PendingFinancialActionUnavailableError,
 } from "../actions/pending-action.service.js";
+import { createFinancialActionProposal } from "../actions/action-proposal.service.js";
+import { executeLatestPendingFinancialAction } from "../actions/pending-action-execution.service.js";
 import type { IntentResult } from "../intents/intent.types.js";
 import {
-  formatWriteNotEnabledResponse,
+  formatEntryCreatedResponse,
+  formatFinancialActionProposal,
+  formatIncompleteFinancialAction,
 } from "../responses/response.formatter.js";
 import type { WhatsAppCommandResult } from "./command.types.js";
 
@@ -17,67 +21,141 @@ export const WHATSAPP_HELP_MESSAGE = [
   "• metas",
   "• insights",
   "• análise financeira",
+  "• registrar receitas",
+  "• registrar despesas",
   "",
-  "Também consigo entender frases de receitas e despesas, mas ainda não registro lançamentos nesta versão.",
+  "Receitas e despesas só são registradas depois da sua confirmação explícita.",
 ].join("\n");
 
-export async function executeWhatsAppCommand({
-  userId,
-  interpretation,
-  now = new Date(),
-}: {
-  userId: string;
-  interpretation: IntentResult;
-  now?: Date;
-}): Promise<WhatsAppCommandResult> {
+interface WhatsAppCommandDependencies {
+  proposalCreator?: typeof createFinancialActionProposal;
+  pendingExecutor?: typeof executeLatestPendingFinancialAction;
+}
+
+export async function executeWhatsAppCommand(
+  {
+    userId,
+    interpretation,
+    now = new Date(),
+  }: {
+    userId: string;
+    interpretation: IntentResult;
+    now?: Date;
+  },
+  dependencies: WhatsAppCommandDependencies = {},
+): Promise<WhatsAppCommandResult> {
+  const proposalCreator =
+    dependencies.proposalCreator ??
+    createFinancialActionProposal;
+  const pendingExecutor =
+    dependencies.pendingExecutor ??
+    executeLatestPendingFinancialAction;
+
   switch (interpretation.intent) {
     case "CREATE_EXPENSE":
-    case "CREATE_INCOME":
-      return {
-        code: "WRITE_NOT_ENABLED",
-        message: formatWriteNotEnabledResponse({
-          intent: interpretation.intent,
-          amount: interpretation.entities.amount,
-          description:
-            interpretation.entities.description,
-        }),
-      };
+    case "CREATE_INCOME": {
+      try {
+        const proposal =
+          await proposalCreator({
+            userId,
+            interpretation,
+            now,
+          });
+
+        if (proposal.status === "INCOMPLETE") {
+          return {
+            code: "INCOMPLETE_ACTION",
+            message: formatIncompleteFinancialAction(
+              proposal.missing,
+            ),
+          };
+        }
+
+        return {
+          code: "PENDING_ACTION_CREATED",
+          message: formatFinancialActionProposal({
+            intent: proposal.type,
+            amount: proposal.payload.amount,
+            description: proposal.payload.description,
+            date: proposal.payload.date,
+            categoryName: proposal.categoryName,
+            accountName: proposal.accountName,
+          }),
+        };
+      } catch (error) {
+        reportWriteError(interpretation.intent, error);
+
+        return writeError();
+      }
+    }
 
     case "CONFIRM": {
-      const action =
-        await confirmLatestPendingFinancialAction({
-          userId,
-          now,
-        });
+      try {
+        const execution =
+          await pendingExecutor({
+            userId,
+            now,
+          });
 
-      if (!action) {
-        return noPendingAction();
+        switch (execution.status) {
+          case "CREATED":
+            return {
+              code: "ENTRY_CREATED",
+              message: formatEntryCreatedResponse(execution),
+            };
+
+          case "EXPIRED":
+            return {
+              code: "ACTION_EXPIRED",
+              message:
+                "Essa operação expirou. Envie o lançamento novamente.",
+            };
+
+          case "INVALID_PAYLOAD":
+          case "INVALID_REFERENCE":
+            return {
+              code: "ACTION_INVALID",
+              message:
+                "Essa operação não é mais válida. Envie o lançamento novamente.",
+            };
+
+          case "NO_PENDING":
+            return noPendingAction();
+        }
+      } catch (error) {
+        reportWriteError(interpretation.intent, error);
+
+        return writeError();
       }
-
-      return {
-        code: "ACTION_CONFIRMED",
-        message:
-          "Confirmação registrada. Nenhum lançamento financeiro foi criado nesta fase.",
-        pendingActionId: action.id,
-      };
     }
 
     case "CANCEL": {
-      const action =
-        await cancelLatestPendingFinancialAction({
-          userId,
-          now,
-        });
+      try {
+        const action =
+          await cancelLatestPendingFinancialAction({
+            userId,
+            now,
+          });
 
-      if (!action) {
-        return noPendingAction();
+        if (!action) {
+          return noPendingAction();
+        }
+
+        return {
+          code: "ACTION_CANCELLED",
+          message: "Ação pendente cancelada.",
+        };
+      } catch (error) {
+        if (
+          error instanceof PendingFinancialActionUnavailableError
+        ) {
+          return noPendingAction();
+        }
+
+        reportWriteError(interpretation.intent, error);
+
+        return writeError();
       }
-
-      return {
-        code: "ACTION_CANCELLED",
-        message: "Ação pendente cancelada.",
-        pendingActionId: action.id,
-      };
     }
 
     case "HELP":
@@ -112,4 +190,30 @@ function noPendingAction(): WhatsAppCommandResult {
     code: "NO_PENDING_ACTION",
     message: "Não há ação pendente para confirmar ou cancelar.",
   };
+}
+
+function writeError(): WhatsAppCommandResult {
+  return {
+    code: "WRITE_ERROR",
+    message:
+      "Não consegui registrar essa operação agora. Tente novamente.",
+  };
+}
+
+function reportWriteError(
+  intent: IntentResult["intent"],
+  error: unknown,
+) {
+  console.error("[whatsapp] write_failed", {
+    intent,
+    errorName:
+      error instanceof Error ? error.name : "UnknownError",
+    errorCode:
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      typeof error.code === "string"
+        ? error.code
+        : undefined,
+  });
 }

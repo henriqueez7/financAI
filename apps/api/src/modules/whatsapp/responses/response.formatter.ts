@@ -52,6 +52,12 @@ interface AiAnalysisSummary {
   } | null;
 }
 
+interface FinancialActionSummary {
+  type: "CREATE_EXPENSE" | "CREATE_INCOME";
+  amount: number;
+  description: string;
+}
+
 export function formatBalanceResponse(
   accounts: AccountSummary[],
 ) {
@@ -227,24 +233,63 @@ export function formatAiAnalysisResponse(
   return limitWhatsAppResponse(sections.join("\n"));
 }
 
-export function formatWriteNotEnabledResponse({
+export function formatFinancialActionProposal({
   intent,
   amount,
   description,
+  date,
+  categoryName,
+  accountName,
 }: {
   intent: "CREATE_EXPENSE" | "CREATE_INCOME";
-  amount?: number;
-  description?: string;
+  amount: number;
+  description: string;
+  date: string;
+  categoryName?: string;
+  accountName?: string;
 }) {
-  const operation =
-    intent === "CREATE_EXPENSE" ? "uma despesa" : "uma receita";
-  const details = [
-    amount ? ` de ${formatCurrency(amount)}` : "",
-    description ? ` em ${description}` : "",
-  ].join("");
+  const isExpense = intent === "CREATE_EXPENSE";
+  const lines = [
+    `Encontrei esta ${isExpense ? "despesa" : "receita"}:`,
+    "",
+    `${isExpense ? "💸" : "💰"} ${formatCurrency(amount)}`,
+    `📝 ${description}`,
+    `📅 ${formatFinancialDate(date)}`,
+  ];
+
+  if (categoryName) {
+    lines.push(`🏷️ ${categoryName}`);
+  }
+
+  if (accountName) {
+    lines.push(`🏦 ${accountName}`);
+  }
+
+  lines.push("", "Confirma o registro?");
+
+  return limitWhatsAppResponse(lines.join("\n"));
+}
+
+export function formatIncompleteFinancialAction(
+  missing: "amount" | "description",
+) {
+  if (missing === "amount") {
+    return "Não consegui identificar o valor. Tente enviar algo como: 'gastei 89 no mercado'.";
+  }
+
+  return "Não consegui identificar a descrição. Tente enviar algo como: 'gastei 89 no mercado'.";
+}
+
+export function formatEntryCreatedResponse({
+  type,
+  amount,
+  description,
+}: FinancialActionSummary) {
+  const label =
+    type === "CREATE_EXPENSE" ? "Despesa" : "Receita";
 
   return limitWhatsAppResponse(
-    `Entendi ${operation}${details}, mas o registro pelo WhatsApp ainda não está habilitado.`,
+    `✅ ${label} registrada com sucesso.\n\n${formatCurrency(amount)} — ${description}`,
   );
 }
 
@@ -293,6 +338,12 @@ function describePeriod(periodHint?: PeriodHint) {
     default:
       return "neste mês";
   }
+}
+
+function formatFinancialDate(date: string) {
+  const [year, month, day] = date.split("-");
+
+  return `${day}/${month}/${year}`;
 }
 
 function formatPercentage(value: number) {
