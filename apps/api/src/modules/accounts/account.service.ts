@@ -74,6 +74,32 @@ interface ListAccountsParams {
   userId: string;
 }
 
+export async function findUniqueActiveAccountByName({
+  userId,
+  name,
+}: {
+  userId: string;
+  name: string;
+}) {
+  const matches = await prisma.account.findMany({
+    where: {
+      userId,
+      isActive: true,
+      name: {
+        equals: name.trim(),
+        mode: "insensitive",
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+    take: 2,
+  });
+
+  return matches.length === 1 ? matches[0] : null;
+}
+
 export async function listAccounts({
   userId,
 }: ListAccountsParams) {

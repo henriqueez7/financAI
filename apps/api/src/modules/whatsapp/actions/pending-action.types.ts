@@ -10,8 +10,8 @@ export type PendingFinancialActionStatus =
 
 export interface PendingFinancialActionPayload {
   amount: number;
-  description?: string;
-  date?: string;
-  categoryHint?: string;
-  accountHint?: string;
+  description: string;
+  date: string;
+  categoryId?: string;
+  accountId?: string;
 }

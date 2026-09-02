@@ -160,45 +160,10 @@ export async function getActivePendingFinancialAction({
   });
 }
 
-export async function confirmPendingFinancialAction(
-  params: PendingFinancialActionParams,
-) {
-  return transitionPendingFinancialAction({
-    ...params,
-    nextStatus: "CONFIRMED",
-  });
-}
-
 export async function cancelPendingFinancialAction(
   params: PendingFinancialActionParams,
 ) {
-  return transitionPendingFinancialAction({
-    ...params,
-    nextStatus: "CANCELLED",
-  });
-}
-
-export async function confirmLatestPendingFinancialAction({
-  userId,
-  now = new Date(),
-}: {
-  userId: string;
-  now?: Date;
-}) {
-  const action = await getActivePendingFinancialAction({
-    userId,
-    now,
-  });
-
-  if (!action) {
-    return null;
-  }
-
-  return confirmPendingFinancialAction({
-    userId,
-    actionId: action.id,
-    now,
-  });
+  return transitionPendingFinancialAction(params);
 }
 
 export async function cancelLatestPendingFinancialAction({
@@ -224,17 +189,11 @@ export async function cancelLatestPendingFinancialAction({
   });
 }
 
-interface TransitionPendingFinancialActionParams
-  extends PendingFinancialActionParams {
-  nextStatus: "CONFIRMED" | "CANCELLED";
-}
-
 async function transitionPendingFinancialAction({
   userId,
   actionId,
-  nextStatus,
   now = new Date(),
-}: TransitionPendingFinancialActionParams) {
+}: PendingFinancialActionParams) {
   const action = await getPendingFinancialAction({
     userId,
     actionId,
@@ -258,11 +217,9 @@ async function transitionPendingFinancialAction({
         },
       },
       data: {
-        status: nextStatus,
-        confirmedAt:
-          nextStatus === "CONFIRMED" ? now : null,
-        cancelledAt:
-          nextStatus === "CANCELLED" ? now : null,
+        status: "CANCELLED",
+        confirmedAt: null,
+        cancelledAt: now,
       },
     });
 

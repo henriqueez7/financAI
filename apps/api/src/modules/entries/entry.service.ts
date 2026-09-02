@@ -1,3 +1,4 @@
+import type { Prisma } from "../../../generated/prisma/client.js";
 import { prisma } from "../../lib/prisma.js";
 
 import type {
@@ -37,17 +38,37 @@ export class EntryNotFoundError extends Error {
   }
 }
 
+type EntryDatabaseClient = Pick<
+  Prisma.TransactionClient,
+  "account" | "category" | "entry"
+>;
+
+export type CreateEntryServiceInput = Omit<
+  CreateEntryInput,
+  "accountId"
+> & {
+  accountId?: string | null;
+};
+
 interface CreateEntryParams {
   userId: string;
-  input: CreateEntryInput;
+  input: CreateEntryServiceInput;
+  client?: EntryDatabaseClient;
+  source?: "WEB" | "WHATSAPP" | "IMPORT";
+  externalId?: string;
+  now?: Date;
 }
 
 export async function createEntry({
   userId,
   input,
+  client = prisma,
+  source = "WEB",
+  externalId,
+  now = new Date(),
 }: CreateEntryParams) {
   if (input.accountId) {
-    const account = await prisma.account.findFirst({
+    const account = await client.account.findFirst({
       where: {
         id: input.accountId,
         userId,
@@ -64,7 +85,7 @@ export async function createEntry({
   }
 
   if (input.categoryId) {
-    const category = await prisma.category.findFirst({
+    const category = await client.category.findFirst({
       where: {
         id: input.categoryId,
         userId,
@@ -87,10 +108,10 @@ export async function createEntry({
 
   const completedAt =
     input.status === "COMPLETED"
-      ? new Date()
+      ? now
       : null;
 
-  const entry = await prisma.entry.create({
+  const entry = await client.entry.create({
     data: {
       userId,
       accountId: input.accountId ?? null,
@@ -99,10 +120,11 @@ export async function createEntry({
       amount: input.amount,
       type: input.type,
       status: input.status,
-      source: "WEB",
+      source,
       dueDate: input.dueDate,
       completedAt,
       notes: input.notes ?? null,
+      externalId,
     },
     select: entrySelect,
   });

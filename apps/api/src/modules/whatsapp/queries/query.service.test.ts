@@ -130,12 +130,21 @@ test("ASK_FINANCE_AI preserva pergunta e filtros sem identificadores", async () 
   );
 });
 
-test("CREATE não consulta serviços e não cria pending action", async () => {
+test("CREATE é encaminhado ao command service sem consultar Reports", async () => {
   let queryCalls = 0;
+  let commandCalls = 0;
   const service = new WhatsAppQueryService({
     reportLoader: async () => {
       queryCalls += 1;
       return createExpenseReport();
+    },
+    commandExecutor: async () => {
+      commandCalls += 1;
+
+      return {
+        code: "PENDING_ACTION_CREATED",
+        message: "Proposta criada.",
+      };
     },
   });
   const result = await execute(
@@ -146,9 +155,9 @@ test("CREATE não consulta serviços e não cria pending action", async () => {
     }),
   );
 
-  assert.equal(result.code, "WRITE_NOT_ENABLED");
-  assert.match(result.message, /registro pelo WhatsApp ainda não/);
+  assert.equal(result.code, "PENDING_ACTION_CREATED");
   assert.equal(queryCalls, 0);
+  assert.equal(commandCalls, 1);
 });
 
 test("falhas de consulta e análise retornam mensagens genéricas", async () => {
