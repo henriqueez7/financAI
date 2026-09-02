@@ -21,6 +21,7 @@ model User {
   goalContributions GoalContribution[]
   pendingFinancialActions PendingFinancialAction[]
   whatsappConnections    WhatsAppConnection[]
+  whatsappLinkChallenges WhatsAppLinkChallenge[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -204,6 +205,29 @@ model WhatsAppConnection {
   @@map("whatsapp_connections")
 }
 
+model WhatsAppLinkChallenge {
+  id            String                      @id @default(uuid())
+  lookupKey     String                      @unique
+  codeHash      String                      @unique
+  status        WhatsAppLinkChallengeStatus @default(PENDING)
+  attempts      Int                         @default(0)
+  maxAttempts   Int                         @default(5)
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  cancelledAt   DateTime?
+  activeUserKey String?                     @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status, expiresAt])
+  @@index([expiresAt])
+  @@map("whatsapp_link_challenges")
+}
+
 model WhatsAppMessage {
   id          String                   @id @default(uuid())
   messageId   String                   @unique
@@ -271,6 +295,14 @@ enum WhatsAppConnectionStatus {
   PENDING
   VERIFIED
   REVOKED
+}
+
+enum WhatsAppLinkChallengeStatus {
+  PENDING
+  CONSUMED
+  CANCELLED
+  EXPIRED
+  BLOCKED
 }
 
 enum WhatsAppMessageDirection {

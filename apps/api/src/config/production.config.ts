@@ -1,3 +1,5 @@
+import { requireWhatsAppLinkSecret } from "./whatsapp-link.config.js";
+
 const DEVELOPMENT_FRONTEND_ORIGIN =
   "http://localhost:3000";
 
@@ -77,6 +79,15 @@ export function validateProductionConfig(
   if (!jwtSecret || jwtSecret.length < 32) {
     throw new Error(
       "JWT_SECRET deve ter pelo menos 32 caracteres em produção.",
+    );
+  }
+
+  const whatsappLinkSecret =
+    requireWhatsAppLinkSecret(environment);
+
+  if (whatsappLinkSecret === jwtSecret) {
+    throw new Error(
+      "WHATSAPP_LINK_SECRET deve ser diferente de JWT_SECRET.",
     );
   }
 

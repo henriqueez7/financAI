@@ -17,6 +17,7 @@ import { goalRoutes } from "./modules/goals/goal.routes.js";
 import { reportRoutes } from "./modules/reports/report.routes.js";
 import { insightRoutes } from "./modules/insights/insight.routes.js";
 import { aiRoutes } from "./modules/ai/ai.routes.js";
+import { whatsappRoutes } from "./modules/whatsapp/whatsapp.routes.js";
 
 export const app = express();
 
@@ -98,6 +99,7 @@ app.use("/goals", goalRoutes);
 app.use("/reports", reportRoutes);
 app.use("/insights", insightRoutes);
 app.use("/ai", aiRoutes);
+app.use("/whatsapp", whatsappRoutes);
 
 const safeErrorHandler: ErrorRequestHandler = (
   error,

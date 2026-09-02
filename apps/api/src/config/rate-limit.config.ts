@@ -30,4 +30,35 @@ export const rateLimitPolicies = {
       maximumEntries: 1,
     },
   },
+  whatsappLink: {
+    generation: {
+      user: {
+        windowMs: 10 * 60 * 1_000,
+        maximumRequests: 3,
+        maximumEntries: maximumTrackedIdentities,
+      },
+      ip: {
+        windowMs: 10 * 60 * 1_000,
+        maximumRequests: 10,
+        maximumEntries: maximumTrackedIdentities,
+      },
+      global: {
+        windowMs: 60 * 1_000,
+        maximumRequests: 100,
+        maximumEntries: 1,
+      },
+    },
+    consumption: {
+      waId: {
+        windowMs: 10 * 60 * 1_000,
+        maximumRequests: 5,
+        maximumEntries: maximumTrackedIdentities,
+      },
+      global: {
+        windowMs: 60 * 1_000,
+        maximumRequests: 100,
+        maximumEntries: 1,
+      },
+    },
+  },
 } as const;

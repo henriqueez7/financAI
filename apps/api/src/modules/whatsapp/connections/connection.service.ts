@@ -1,3 +1,4 @@
+import type { Prisma } from "../../../../generated/prisma/client.js";
 import { prisma } from "../../../lib/prisma.js";
 
 import { whatsappConnectionInputSchema } from "./connection.schema.js";
@@ -145,13 +146,86 @@ export async function revokeWhatsAppConnection({
     connectionId,
   });
 
-  return prisma.whatsAppConnection.update({
-    where: {
-      id: connection.id,
-    },
-    data: {
-      status: "REVOKED",
-    },
+  return prisma.$transaction(async (transaction) => {
+    await cancelActiveLinkChallenges({
+      userId,
+      now: new Date(),
+      transaction,
+    });
+
+    return transaction.whatsAppConnection.update({
+      where: {
+        id: connection.id,
+      },
+      data: {
+        status: "REVOKED",
+        verifiedAt: null,
+      },
+    });
+  });
+}
+
+export async function getWhatsAppConnectionStatus({
+  userId,
+}: {
+  userId: string;
+}) {
+  const connection =
+    await prisma.whatsAppConnection.findUnique({
+      where: { userId },
+      select: {
+        status: true,
+        verifiedAt: true,
+        phoneNumber: true,
+      },
+    });
+
+  if (!connection) {
+    return {
+      connected: false,
+      status: "NOT_CONNECTED" as const,
+      verifiedAt: null,
+      phoneNumberMasked: null,
+    };
+  }
+
+  return {
+    connected: connection.status === "VERIFIED",
+    status: connection.status,
+    verifiedAt: connection.verifiedAt,
+    phoneNumberMasked: maskPhoneNumber(
+      connection.phoneNumber,
+    ),
+  };
+}
+
+export async function revokeWhatsAppConnectionForUser({
+  userId,
+  now = new Date(),
+}: {
+  userId: string;
+  now?: Date;
+}) {
+  return prisma.$transaction(async (transaction) => {
+    await cancelActiveLinkChallenges({
+      userId,
+      now,
+      transaction,
+    });
+
+    const transition =
+      await transaction.whatsAppConnection.updateMany({
+        where: {
+          userId,
+          status: { not: "REVOKED" },
+        },
+        data: {
+          status: "REVOKED",
+          verifiedAt: null,
+        },
+      });
+
+    return { revoked: transition.count === 1 };
   });
 }
 
@@ -183,4 +257,32 @@ function hasPrismaErrorCode(
     "code" in error &&
     error.code === code
   );
+}
+
+async function cancelActiveLinkChallenges({
+  userId,
+  now,
+  transaction,
+}: {
+  userId: string;
+  now: Date;
+  transaction: Prisma.TransactionClient;
+}) {
+  await transaction.whatsAppLinkChallenge.updateMany({
+    where: {
+      userId,
+      status: "PENDING",
+    },
+    data: {
+      status: "CANCELLED",
+      activeUserKey: null,
+      cancelledAt: now,
+    },
+  });
+}
+
+function maskPhoneNumber(phoneNumber: string) {
+  return `${"*".repeat(
+    Math.max(0, phoneNumber.length - 4),
+  )}${phoneNumber.slice(-4)}`;
 }

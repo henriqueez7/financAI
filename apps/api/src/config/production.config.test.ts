@@ -9,6 +9,7 @@ import {
 const validProductionEnvironment = {
   NODE_ENV: "production",
   JWT_SECRET: "a".repeat(32),
+  WHATSAPP_LINK_SECRET: "b".repeat(32),
   FRONTEND_URL: "https://app.finance-ai.example",
 } as NodeJS.ProcessEnv;
 
@@ -35,6 +36,36 @@ test("configuração de produção rejeita segredo curto", () => {
         JWT_SECRET: "short-secret",
       }),
     /pelo menos 32 caracteres/,
+  );
+});
+
+test("configuração de produção exige segredo exclusivo para vinculação", () => {
+  assert.throws(
+    () =>
+      validateProductionConfig({
+        ...validProductionEnvironment,
+        WHATSAPP_LINK_SECRET: "short-secret",
+      }),
+    /WHATSAPP_LINK_SECRET.*32 caracteres/,
+  );
+
+  assert.throws(
+    () =>
+      validateProductionConfig({
+        ...validProductionEnvironment,
+        WHATSAPP_LINK_SECRET: undefined,
+      }),
+    /WHATSAPP_LINK_SECRET.*32 caracteres/,
+  );
+
+  assert.throws(
+    () =>
+      validateProductionConfig({
+        ...validProductionEnvironment,
+        WHATSAPP_LINK_SECRET:
+          validProductionEnvironment.JWT_SECRET,
+      }),
+    /diferente de JWT_SECRET/,
   );
 });
 
