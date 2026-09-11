@@ -1,4 +1,5 @@
 import { requireWhatsAppLinkSecret } from "./whatsapp-link.config.js";
+import { validateMetaWhatsAppProductionConfig } from "./whatsapp-meta.config.js";
 
 const DEVELOPMENT_FRONTEND_ORIGIN =
   "http://localhost:3000";
@@ -88,6 +89,25 @@ export function validateProductionConfig(
   if (whatsappLinkSecret === jwtSecret) {
     throw new Error(
       "WHATSAPP_LINK_SECRET deve ser diferente de JWT_SECRET.",
+    );
+  }
+
+  const metaConfig =
+    validateMetaWhatsAppProductionConfig(environment);
+
+  if (
+    metaConfig.appSecret === jwtSecret ||
+    metaConfig.verifyToken === jwtSecret ||
+    metaConfig.accessToken === jwtSecret ||
+    metaConfig.appSecret === whatsappLinkSecret ||
+    metaConfig.verifyToken === whatsappLinkSecret ||
+    metaConfig.accessToken === whatsappLinkSecret ||
+    metaConfig.appSecret === metaConfig.verifyToken ||
+    metaConfig.appSecret === metaConfig.accessToken ||
+    metaConfig.verifyToken === metaConfig.accessToken
+  ) {
+    throw new Error(
+      "Os secrets do WhatsApp Meta devem ser exclusivos.",
     );
   }
 

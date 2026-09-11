@@ -9,7 +9,7 @@ export class WhatsAppMessageNotFoundError extends Error {
 
 interface RegisterInboundMessageParams {
   messageId: string;
-  connectionId: string;
+  connectionId?: string | null;
   receivedAt?: Date;
 }
 
@@ -101,6 +101,34 @@ export async function markWhatsAppMessageFailed({
   });
 }
 
+export function markClaimedWhatsAppMessageProcessed({
+  recordId,
+  processedAt = new Date(),
+}: {
+  recordId: string;
+  processedAt?: Date;
+}) {
+  return updateClaimedWhatsAppMessageStatus({
+    recordId,
+    status: "PROCESSED",
+    processedAt,
+  });
+}
+
+export function markClaimedWhatsAppMessageFailed({
+  recordId,
+  processedAt = new Date(),
+}: {
+  recordId: string;
+  processedAt?: Date;
+}) {
+  return updateClaimedWhatsAppMessageStatus({
+    recordId,
+    status: "FAILED",
+    processedAt,
+  });
+}
+
 async function updateWhatsAppMessageStatus({
   userId,
   messageId,
@@ -136,6 +164,36 @@ async function updateWhatsAppMessageStatus({
       status,
       processedAt,
     },
+  });
+}
+
+async function updateClaimedWhatsAppMessageStatus({
+  recordId,
+  status,
+  processedAt,
+}: {
+  recordId: string;
+  status: "PROCESSED" | "FAILED";
+  processedAt: Date;
+}) {
+  const transition = await prisma.whatsAppMessage.updateMany({
+    where: {
+      id: recordId,
+      direction: "INBOUND",
+      status: "RECEIVED",
+    },
+    data: {
+      status,
+      processedAt,
+    },
+  });
+
+  if (transition.count !== 1) {
+    throw new WhatsAppMessageNotFoundError();
+  }
+
+  return prisma.whatsAppMessage.findUniqueOrThrow({
+    where: { id: recordId },
   });
 }
 

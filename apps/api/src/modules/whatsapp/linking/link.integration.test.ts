@@ -413,7 +413,11 @@ test("challenge consumida é single-use para mesmo ou outro waId", async () => {
   );
 
   assert.equal(
-    await prisma.whatsAppConnection.count(),
+    await prisma.whatsAppConnection.count({
+      where: {
+        userId: { in: [userAId, userBId, userCId] },
+      },
+    }),
     1,
   );
   assert.equal(
@@ -616,7 +620,11 @@ test("revogação também invalida uma challenge ainda pendente", async () => {
     consumeCode(userAId, challenge.code, "1"),
   );
   assert.equal(
-    await prisma.whatsAppConnection.count(),
+    await prisma.whatsAppConnection.count({
+      where: {
+        userId: { in: [userAId, userBId, userCId] },
+      },
+    }),
     0,
   );
 });

@@ -233,18 +233,24 @@ export async function getVerifiedWhatsAppConnectionByWaId(
   waId: string,
 ) {
   const connection =
-    await prisma.whatsAppConnection.findFirst({
-      where: {
-        waId,
-        status: "VERIFIED",
-      },
-    });
+    await findVerifiedWhatsAppConnectionByWaId(waId);
 
   if (!connection) {
     throw new WhatsAppConnectionNotFoundError();
   }
 
   return connection;
+}
+
+export function findVerifiedWhatsAppConnectionByWaId(
+  waId: string,
+) {
+  return prisma.whatsAppConnection.findFirst({
+    where: {
+      waId,
+      status: "VERIFIED",
+    },
+  });
 }
 
 function hasPrismaErrorCode(

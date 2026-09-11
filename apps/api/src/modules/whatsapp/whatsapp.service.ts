@@ -3,6 +3,8 @@ import { FinancialLanguageInterpreter } from "./intents/financial-language-inter
 import { LazyOpenAiIntentProvider } from "./intents/openai-intent.provider.js";
 import type { MessageProvider } from "./messaging/message.provider.js";
 import {
+  markClaimedWhatsAppMessageFailed,
+  markClaimedWhatsAppMessageProcessed,
   markWhatsAppMessageFailed,
   markWhatsAppMessageProcessed,
   registerInboundWhatsAppMessage,
@@ -28,6 +30,14 @@ interface WhatsAppServiceDependencies {
   languageInterpreter?: LanguageInterpreter;
   queryRouter?: QueryRouter;
   now?: () => Date;
+}
+
+interface ClaimedWhatsAppMessage {
+  connection: {
+    userId: string;
+    waId: string;
+  };
+  recordId: string;
 }
 
 export class WhatsAppService {
@@ -71,6 +81,51 @@ export class WhatsAppService {
       };
     }
 
+    return this.processText({
+      input,
+      connection,
+      markFailed: () =>
+        markWhatsAppMessageFailed({
+          userId: connection.userId,
+          messageId: registered.message.messageId,
+        }),
+      markProcessed: () =>
+        markWhatsAppMessageProcessed({
+          userId: connection.userId,
+          messageId: registered.message.messageId,
+        }),
+    });
+  }
+
+  async processClaimedIncomingText(
+    input: IncomingWhatsAppText,
+    claim: ClaimedWhatsAppMessage,
+  ): Promise<WhatsAppProcessingResult> {
+    return this.processText({
+      input,
+      connection: claim.connection,
+      markFailed: () =>
+        markClaimedWhatsAppMessageFailed({
+          recordId: claim.recordId,
+        }),
+      markProcessed: () =>
+        markClaimedWhatsAppMessageProcessed({
+          recordId: claim.recordId,
+        }),
+    });
+  }
+
+  private async processText({
+    input,
+    connection,
+    markFailed,
+    markProcessed,
+  }: {
+    input: IncomingWhatsAppText;
+    connection: { userId: string; waId: string };
+    markFailed: () => Promise<unknown>;
+    markProcessed: () => Promise<unknown>;
+  }): Promise<WhatsAppProcessingResult> {
     try {
       const referenceDate = this.now();
       const interpretation = await this.languageInterpreter.interpret(
@@ -88,22 +143,16 @@ export class WhatsAppService {
         text: command.message,
       });
 
-      await markWhatsAppMessageProcessed({
-        userId: connection.userId,
-        messageId: registered.message.messageId,
-      });
+      await markProcessed();
 
       return {
         status: "PROCESSED",
-        messageId: registered.message.messageId,
+        messageId: input.messageId,
         interpretation,
         command,
       };
     } catch (error) {
-      await markWhatsAppMessageFailed({
-        userId: connection.userId,
-        messageId: registered.message.messageId,
-      });
+      await markFailed();
 
       throw error;
     }

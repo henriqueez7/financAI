@@ -18,6 +18,7 @@ import { reportRoutes } from "./modules/reports/report.routes.js";
 import { insightRoutes } from "./modules/insights/insight.routes.js";
 import { aiRoutes } from "./modules/ai/ai.routes.js";
 import { whatsappRoutes } from "./modules/whatsapp/whatsapp.routes.js";
+import { whatsappWebhookRoutes } from "./modules/whatsapp/webhooks/whatsapp-webhook.routes.js";
 
 export const app = express();
 
@@ -59,6 +60,10 @@ app.use(
     origin: resolveFrontendOrigin(),
   }),
 );
+
+// A assinatura da Meta cobre os bytes exatos. Esta rota precisa ser
+// registrada antes do parser JSON global e preserva raw body só no webhook.
+app.use("/webhooks/whatsapp", whatsappWebhookRoutes);
 
 app.use(express.json());
 
