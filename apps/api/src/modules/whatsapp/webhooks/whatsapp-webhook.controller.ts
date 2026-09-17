@@ -3,8 +3,14 @@ import type { Request, Response } from "express";
 import {
   whatsappWebhookPayloadSchema,
 } from "./whatsapp-webhook.schema.js";
-import { verifyWhatsAppWebhookSignature } from "./whatsapp-webhook.signature.js";
-import type { WhatsAppWebhookProcessor } from "./whatsapp-webhook.service.js";
+
+import {
+  verifyWhatsAppWebhookSignature,
+} from "./whatsapp-webhook.signature.js";
+
+import type {
+  WhatsAppWebhookProcessor,
+} from "./whatsapp-webhook.service.js";
 
 export function verifyWhatsAppWebhookController(
   request: Request,
@@ -29,7 +35,10 @@ export function verifyWhatsAppWebhookController(
     return response.status(403).send("Forbidden");
   }
 
-  return response.status(200).type("text/plain").send(challenge);
+  return response
+    .status(200)
+    .type("text/plain")
+    .send(challenge);
 }
 
 export async function receiveWhatsAppWebhookController(
@@ -50,6 +59,7 @@ export async function receiveWhatsAppWebhookController(
   }
 
   const signature = request.get("x-hub-signature-256");
+
   const isAuthentic = verifyWhatsAppWebhookSignature({
     appSecret,
     rawBody: request.body,
@@ -58,6 +68,7 @@ export async function receiveWhatsAppWebhookController(
 
   if (!isAuthentic) {
     console.warn("[whatsapp-webhook] invalid_signature");
+
     return response.status(401).json({
       message: "Assinatura inválida.",
     });
@@ -66,7 +77,9 @@ export async function receiveWhatsAppWebhookController(
   let decodedPayload: unknown;
 
   try {
-    decodedPayload = JSON.parse(request.body.toString("utf8"));
+    decodedPayload = JSON.parse(
+      request.body.toString("utf8"),
+    );
   } catch {
     return response.status(400).json({
       message: "Payload inválido.",
@@ -84,36 +97,70 @@ export async function receiveWhatsAppWebhookController(
   }
 
   try {
-    const result = await getProcessor().process(payload.data);
+    const result = await getProcessor().process(
+      payload.data,
+    );
 
     if (result.duplicateCount > 0) {
-      console.info("[whatsapp-webhook] duplicate_ignored", {
-        count: result.duplicateCount,
-      });
+      console.info(
+        "[whatsapp-webhook] duplicate_ignored",
+        {
+          count: result.duplicateCount,
+        },
+      );
     }
 
     if (result.processedCount > 0) {
-      console.info("[whatsapp-webhook] message_processed", {
-        count: result.processedCount,
-      });
+      console.info(
+        "[whatsapp-webhook] message_processed",
+        {
+          count: result.processedCount,
+        },
+      );
     }
 
-    return response.status(200).json({ received: true });
-  } catch (error) {
-    console.error("[whatsapp-webhook] processing_failed", {
-      errorName:
-        error instanceof Error
-          ? error.name
-          : "UnknownError",
+    return response.status(200).json({
+      received: true,
     });
+  } catch (error) {
+    console.error(
+      "[whatsapp-webhook] processing_failed",
+      {
+        errorName:
+          error instanceof Error
+            ? error.name
+            : "UnknownError",
+
+        errorCode:
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error
+            ? error.code
+            : undefined,
+
+        statusCode:
+          typeof error === "object" &&
+          error !== null &&
+          "statusCode" in error
+            ? error.statusCode
+            : undefined,
+      },
+    );
 
     return response.status(500).json({
-      message: "Não foi possível processar o webhook.",
+      message:
+        "Não foi possível processar o webhook.",
     });
   }
 }
 
-function readQueryValue(request: Request, key: string) {
+function readQueryValue(
+  request: Request,
+  key: string,
+) {
   const value = request.query[key];
-  return typeof value === "string" ? value : null;
+
+  return typeof value === "string"
+    ? value
+    : null;
 }
